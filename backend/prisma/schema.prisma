@@ -1,0 +1,645 @@
+// Prisma schema matching the user's exact database structure
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  tenant_id   BigInt    @id @default(autoincrement())
+  tenant_name String    @db.VarChar(255)
+  created_at  DateTime  @default(now()) @db.Timestamp(0)
+  companies   Company[]
+
+  @@map("tenants")
+}
+
+model Company {
+  company_id   BigInt       @id @default(autoincrement())
+  tenant_id    BigInt
+  company_name String       @db.VarChar(255)
+  company_type CompanyType
+  created_at   DateTime     @default(now()) @db.Timestamp(0)
+
+  tenant       Tenant       @relation(fields: [tenant_id], references: [tenant_id], onDelete: Cascade)
+  departments  Department[]
+  users        User[]
+  requests     DepartmentCreationRequest[]
+  
+  // New ERP relations
+  holidays      Holiday[]
+  leads         Lead[]
+  clients       Client[]
+  projects      Project[]
+  expenses      Expense[]
+  invoices      Invoice[]
+  vendors       Vendor[]
+  vendor_bills  VendorBill[]
+  assets        Asset[]
+  approvals     Approval[]
+  job_postings  JobPosting[]
+  meetings      Meeting[]
+  announcements Announcement[]
+
+  @@map("companies")
+}
+
+enum CompanyType {
+  SINGLE
+  MULTI
+}
+
+model Department {
+  department_id   BigInt       @id @default(autoincrement())
+  company_id      BigInt
+  department_name String       @db.VarChar(255)
+  description     String?      @db.Text
+  is_custom       Boolean      @default(false)
+  created_by      BigInt?
+  created_at      DateTime     @default(now()) @db.Timestamp(0)
+
+  company         Company      @relation(fields: [company_id], references: [company_id], onDelete: Cascade)
+  users           User[]
+  features        DepartmentFeature[]
+
+  @@map("departments")
+}
+
+model Role {
+  role_id     BigInt           @id @default(autoincrement())
+  role_name   String           @unique @db.VarChar(100)
+  description String?          @db.Text
+
+  permissions RolePermission[]
+  users       User[]
+
+  @@map("roles")
+}
+
+model Permission {
+  permission_id   BigInt           @id @default(autoincrement())
+  permission_name String           @unique @db.VarChar(255)
+
+  roles           RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  role_id       BigInt
+  permission_id BigInt
+  role          Role       @relation(fields: [role_id], references: [role_id], onDelete: Cascade)
+  permission    Permission @relation(fields: [permission_id], references: [permission_id], onDelete: Cascade)
+
+  @@id([role_id, permission_id])
+  @@map("role_permissions")
+}
+
+model User {
+  user_id        BigInt       @id @default(autoincrement())
+  company_id     BigInt
+  department_id  BigInt?
+  role_id        BigInt
+  first_name     String?      @db.VarChar(100)
+  last_name      String?      @db.VarChar(100)
+  email          String       @unique @db.VarChar(255)
+  password_hash  String       @db.VarChar(255)
+  phone          String?      @db.VarChar(20)
+  is_active      Boolean      @default(true)
+  email_verified Boolean      @default(false)
+  created_at     DateTime     @default(now()) @db.Timestamp(0)
+
+  company        Company      @relation(fields: [company_id], references: [company_id], onDelete: Cascade)
+  department     Department?  @relation(fields: [department_id], references: [department_id], onDelete: SetNull)
+  role           Role         @relation(fields: [role_id], references: [role_id])
+  
+  verifications  EmailVerification[]
+  tokens         RefreshToken[]
+  requested_requests DepartmentCreationRequest[] @relation("RequestedBy")
+  approved_requests  DepartmentCreationRequest[] @relation("ApprovedBy")
+
+  // New ERP relations
+  employee_profile   EmployeeProfile?
+  managed_profiles   EmployeeProfile[]    @relation("Manager")
+  attendance         Attendance[]
+  leave_requests     LeaveRequest[]
+  leave_balances     LeaveBalance[]
+  salary_structure   SalaryStructure?
+  payroll            Payroll[]
+  project_assignments ProjectAssignment[]
+  assigned_tasks     Task[]               @relation("Assignee")
+  timesheets         Timesheet[]
+  expenses           Expense[]
+  asset_assignments  AssetAssignment[]
+  requested_approvals Approval[]          @relation("RequestedBy")
+  approved_approvals  Approval[]          @relation("ApprovedBy")
+  audit_logs         AuditLog[]
+  notifications      Notification[]
+
+  @@map("users")
+}
+
+model EmailVerification {
+  verification_id BigInt   @id @default(autoincrement())
+  user_id         BigInt
+  email           String   @db.VarChar(255)
+  otp_code        String   @db.VarChar(10)
+  expires_at      DateTime @db.DateTime(0)
+  attempts        Int      @default(0)
+  verified        Boolean  @default(false)
+  created_at      DateTime @default(now()) @db.Timestamp(0)
+
+  user            User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@map("email_verifications")
+}
+
+model RefreshToken {
+  token_id   BigInt    @id @default(autoincrement())
+  user_id    BigInt
+  token_hash String?   @db.VarChar(500)
+  expires_at DateTime? @db.DateTime(0)
+  revoked    Boolean   @default(false)
+  created_at DateTime  @default(now()) @db.Timestamp(0)
+
+  user       User      @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model DepartmentFeature {
+  feature_id    BigInt     @id @default(autoincrement())
+  department_id BigInt
+  feature_name  String     @db.VarChar(255)
+  enabled       Boolean    @default(true)
+
+  department    Department @relation(fields: [department_id], references: [department_id], onDelete: Cascade)
+
+  @@map("department_features")
+}
+
+model DepartmentCreationRequest {
+  request_id      BigInt    @id @default(autoincrement())
+  company_id      BigInt
+  requested_by_id BigInt
+  department_name String    @db.VarChar(255)
+  description     String?   @db.Text
+  status          String    @default("pending") @db.VarChar(50)
+  approved_by_id  BigInt?
+  created_at      DateTime  @default(now()) @db.Timestamp(0)
+  updated_at      DateTime  @updatedAt @db.Timestamp(0)
+
+  company         Company   @relation(fields: [company_id], references: [company_id], onDelete: Cascade)
+  requested_by    User      @relation("RequestedBy", fields: [requested_by_id], references: [user_id], onDelete: Cascade)
+  approved_by     User?     @relation("ApprovedBy", fields: [approved_by_id], references: [user_id], onDelete: SetNull)
+
+  @@map("department_creation_requests")
+}
+
+// ──────────────────────────────────────────────────────────
+// HRMS MODULE
+// ──────────────────────────────────────────────────────────
+
+model EmployeeProfile {
+  profile_id  BigInt   @id @default(autoincrement())
+  user_id     BigInt   @unique
+  job_title   String   @db.VarChar(100)
+  hire_date   DateTime @db.Date
+  manager_id  BigInt?
+  status      String   @default("ACTIVE") @db.VarChar(50)
+  created_at  DateTime @default(now()) @db.Timestamp(0)
+  updated_at  DateTime @updatedAt @db.Timestamp(0)
+
+  user        User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  manager     User?    @relation("Manager", fields: [manager_id], references: [user_id], onDelete: SetNull)
+
+  @@map("employee_profiles")
+}
+
+model Attendance {
+  attendance_id BigInt    @id @default(autoincrement())
+  user_id       BigInt
+  date          DateTime  @db.Date
+  check_in      DateTime? @db.DateTime(0)
+  check_out     DateTime? @db.DateTime(0)
+  status        String    @default("PRESENT") @db.VarChar(50)
+  created_at    DateTime  @default(now()) @db.Timestamp(0)
+
+  user          User      @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@map("attendance")
+}
+
+model LeaveRequest {
+  leave_id   BigInt   @id @default(autoincrement())
+  user_id    BigInt
+  leave_type String   @db.VarChar(100)
+  start_date DateTime @db.Date
+  end_date   DateTime @db.Date
+  reason     String?  @db.Text
+  status     String   @default("PENDING") @db.VarChar(50)
+  created_at DateTime @default(now()) @db.Timestamp(0)
+
+  user       User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@map("leave_requests")
+}
+
+model LeaveBalance {
+  balance_id BigInt @id @default(autoincrement())
+  user_id    BigInt
+  leave_type String @db.VarChar(100)
+  allocated  Int
+  used       Int    @default(0)
+
+  user       User   @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@map("leave_balances")
+}
+
+model Holiday {
+  holiday_id BigInt   @id @default(autoincrement())
+  company_id BigInt
+  name       String   @db.VarChar(255)
+  date       DateTime @db.Date
+
+  company    Company  @relation(fields: [company_id], references: [company_id], onDelete: Cascade)
+
+  @@map("holidays")
+}
+
+model SalaryStructure {
+  structure_id BigInt  @id @default(autoincrement())
+  user_id      BigInt  @unique
+  base_salary  Decimal @db.Decimal(15, 2)
+  allowances   Decimal @default(0) @db.Decimal(15, 2)
+  deductions   Decimal @default(0) @db.Decimal(15, 2)
+
+  user         User    @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@map("salary_structures")
+}
+
+model Payroll {
+  payroll_id      BigInt   @id @default(autoincrement())
+  user_id         BigInt
+  month           String   @db.VarChar(7)
+  base_paid       Decimal  @db.Decimal(15, 2)
+  allowances_paid Decimal  @db.Decimal(15, 2)
+  deductions_paid Decimal  @db.Decimal(15, 2)
+  net_paid        Decimal  @db.Decimal(15, 2)
+  status          String   @default("PAID") @db.VarChar(50)
+  processed_at    DateTime @default(now()) @db.Timestamp(0)
+
+  user            User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@map("payroll")
+}
+
+// ──────────────────────────────────────────────────────────
+// CRM MODULE
+// ──────────────────────────────────────────────────────────
+
+model Lead {
+  lead_id    BigInt   @id @default(autoincrement())
+  company_id BigInt
+  name       String   @db.VarChar(255)
+  email      String?  @db.VarChar(255)
+  phone      String?  @db.VarChar(50)
+  status     String   @default("NEW") @db.VarChar(50)
+  value      Decimal  @default(0) @db.Decimal(15, 2)
+  source     String?  @db.VarChar(100)
+  created_at DateTime @default(now()) @db.Timestamp(0)
+
+  company    Company  @relation(fields: [company_id], references: [company_id], onDelete: Cascade)
+
+  @@map("leads")
+}
+
+model Client {
+  client_id  BigInt    @id @default(autoincrement())
+  company_id BigInt
+  name       String    @db.VarChar(255)
+  email      String?   @db.VarChar(255)
+  phone      String?   @db.VarChar(50)
+  address    String?   @db.Text
+  created_at DateTime  @default(now()) @db.Timestamp(0)
+
+  company    Company   @relation(fields: [company_id], references: [company_id], onDelete: Cascade)
+  invoices   Invoice[]
+
+  @@map("clients")
+}
+
+// ──────────────────────────────────────────────────────────
+// PROJECT MANAGEMENT MODULE
+// ──────────────────────────────────────────────────────────
+
+model Project {
+  project_id         BigInt              @id @default(autoincrement())
+  company_id         BigInt
+  project_name       String              @db.VarChar(255)
+  description        String?             @db.Text
+  start_date         DateTime?           @db.Date
+  end_date           DateTime?           @db.Date
+  budget             Decimal             @default(0) @db.Decimal(15, 2)
+  cost               Decimal             @default(0) @db.Decimal(15, 2)
+  revenue            Decimal             @default(0) @db.Decimal(15, 2)
+  completion_percent Int                 @default(0)
+  status             String              @default("ACTIVE") @db.VarChar(50)
+  created_at         DateTime            @default(now()) @db.Timestamp(0)
+
+  company            Company             @relation(fields: [company_id], references: [company_id], onDelete: Cascade)
+  assignments        ProjectAssignment[]
+  milestones         ProjectMilestone[]
+  tasks              Task[]
+  documents          ProjectDocument[]
+
+  @@map("projects")
+}
+
+model ProjectAssignment {
+  assignment_id   BigInt @id @default(autoincrement())
+  project_id      BigInt
+  user_id         BigInt
+  role            String @db.VarChar(100)
+  allocated_hours Int    @default(0)
+
+  project         Project @relation(fields: [project_id], references: [project_id], onDelete: Cascade)
+  user            User    @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@map("project_assignments")
+}
+
+model ProjectMilestone {
+  milestone_id   BigInt   @id @default(autoincrement())
+  project_id     BigInt
+  name           String   @db.VarChar(255)
+  due_date       DateTime @db.Date
+  target_cost    Decimal  @default(0) @db.Decimal(15, 2)
+  target_revenue Decimal  @default(0) @db.Decimal(15, 2)
+  status         String   @default("PENDING") @db.VarChar(50)
+
+  project        Project  @relation(fields: [project_id], references: [project_id], onDelete: Cascade)
+
+  @@map("project_milestones")
+}
+
+model Task {
+  task_id         BigInt      @id @default(autoincrement())
+  project_id      BigInt
+  assigned_to_id  BigInt?
+  name            String      @db.VarChar(255)
+  description     String?     @db.Text
+  status          String      @default("TODO") @db.VarChar(50)
+  priority        String      @default("MEDIUM") @db.VarChar(50)
+  estimated_hours Int         @default(0)
+  due_date        DateTime?   @db.Date
+
+  project         Project     @relation(fields: [project_id], references: [project_id], onDelete: Cascade)
+  assignee        User?       @relation("Assignee", fields: [assigned_to_id], references: [user_id], onDelete: SetNull)
+  timesheets      Timesheet[]
+
+  @@map("tasks")
+}
+
+model Timesheet {
+  timesheet_id BigInt   @id @default(autoincrement())
+  task_id      BigInt
+  user_id      BigInt
+  date         DateTime @db.Date
+  hours_logged Decimal  @db.Decimal(5, 2)
+  description  String?  @db.Text
+  created_at   DateTime @default(now()) @db.Timestamp(0)
+
+  task         Task     @relation(fields: [task_id], references: [task_id], onDelete: Cascade)
+  user         User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@map("timesheets")
+}
+
+model ProjectDocument {
+  document_id BigInt   @id @default(autoincrement())
+  project_id  BigInt
+  name        String   @db.VarChar(255)
+  file_path   String   @db.VarChar(500)
+  created_at  DateTime @default(now()) @db.Timestamp(0)
+
+  project     Project  @relation(fields: [project_id], references: [project_id], onDelete: Cascade)
+
+  @@map("project_documents")
+}
+
+// ──────────────────────────────────────────────────────────
+// FINANCE MODULE
+// ──────────────────────────────────────────────────────────
+
+model Expense {
+  expense_id  BigInt   @id @default(autoincrement())
+  company_id  BigInt
+  user_id     BigInt
+  category    String   @db.VarChar(100)
+  amount      Decimal  @db.Decimal(15, 2)
+  description String?  @db.Text
+  status      String   @default("PENDING") @db.VarChar(50)
+  created_at  DateTime @default(now()) @db.Timestamp(0)
+
+  company     Company  @relation(fields: [company_id], references: [company_id], onDelete: Cascade)
+  user        User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@map("expenses")
+}
+
+model Invoice {
+  invoice_id     BigInt    @id @default(autoincrement())
+  company_id     BigInt
+  client_id      BigInt
+  invoice_number String    @unique @db.VarChar(100)
+  amount         Decimal   @db.Decimal(15, 2)
+  status         String    @default("UNPAID") @db.VarChar(50)
+  due_date       DateTime  @db.Date
+  created_at     DateTime  @default(now()) @db.Timestamp(0)
+
+  company        Company   @relation(fields: [company_id], references: [company_id], onDelete: Cascade)
+  client         Client    @relation(fields: [client_id], references: [client_id], onDelete: Cascade)
+  payments       Payment[]
+
+  @@map("invoices")
+}
+
+model Payment {
+  payment_id     BigInt   @id @default(autoincrement())
+  invoice_id     BigInt
+  amount         Decimal  @db.Decimal(15, 2)
+  payment_method String   @db.VarChar(100)
+  paid_at        DateTime @default(now()) @db.Timestamp(0)
+
+  invoice        Invoice  @relation(fields: [invoice_id], references: [invoice_id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+model Vendor {
+  vendor_id  BigInt       @id @default(autoincrement())
+  company_id BigInt
+  name       String       @db.VarChar(255)
+  email      String?      @db.VarChar(255)
+  phone      String?      @db.VarChar(50)
+
+  company    Company      @relation(fields: [company_id], references: [company_id], onDelete: Cascade)
+  bills      VendorBill[]
+
+  @@map("vendors")
+}
+
+model VendorBill {
+  bill_id     BigInt   @id @default(autoincrement())
+  company_id  BigInt
+  vendor_id   BigInt
+  bill_number String   @db.VarChar(100)
+  amount      Decimal  @db.Decimal(15, 2)
+  status      String   @default("PENDING") @db.VarChar(50)
+  due_date    DateTime @db.Date
+  created_at  DateTime @default(now()) @db.Timestamp(0)
+
+  company     Company  @relation(fields: [company_id], references: [company_id], onDelete: Cascade)
+  vendor      Vendor   @relation(fields: [vendor_id], references: [vendor_id], onDelete: Cascade)
+
+  @@map("vendor_bills")
+}
+
+// ──────────────────────────────────────────────────────────
+// ASSET MANAGEMENT MODULE
+// ──────────────────────────────────────────────────────────
+
+model Asset {
+  asset_id      BigInt            @id @default(autoincrement())
+  company_id    BigInt
+  name          String            @db.VarChar(255)
+  serial_number String            @db.VarChar(100)
+  condition     String            @default("AVAILABLE") @db.VarChar(50)
+  created_at    DateTime          @default(now()) @db.Timestamp(0)
+
+  company       Company           @relation(fields: [company_id], references: [company_id], onDelete: Cascade)
+  assignments   AssetAssignment[]
+
+  @@map("assets")
+}
+
+model AssetAssignment {
+  assignment_id BigInt    @id @default(autoincrement())
+  asset_id      BigInt
+  user_id       BigInt
+  assigned_at   DateTime  @default(now()) @db.Timestamp(0)
+  returned_at   DateTime? @db.DateTime(0)
+
+  asset         Asset     @relation(fields: [asset_id], references: [asset_id], onDelete: Cascade)
+  user          User      @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@map("asset_assignments")
+}
+
+// ──────────────────────────────────────────────────────────
+// WORKFLOW & GOVERNANCE MODULE
+// ──────────────────────────────────────────────────────────
+
+model Approval {
+  approval_id     BigInt   @id @default(autoincrement())
+  company_id      BigInt
+  module          String   @db.VarChar(100)
+  record_id       BigInt
+  requested_by_id BigInt
+  approved_by_id  BigInt?
+  status          String   @default("PENDING") @db.VarChar(50)
+  comments        String?  @db.Text
+  created_at      DateTime @default(now()) @db.Timestamp(0)
+  updated_at      DateTime @updatedAt @db.Timestamp(0)
+
+  company         Company  @relation(fields: [company_id], references: [company_id], onDelete: Cascade)
+  requested_by    User     @relation("RequestedBy", fields: [requested_by_id], references: [user_id], onDelete: Cascade)
+  approved_by     User?    @relation("ApprovedBy", fields: [approved_by_id], references: [user_id], onDelete: SetNull)
+
+  @@map("approvals")
+}
+
+model AuditLog {
+  log_id     BigInt   @id @default(autoincrement())
+  user_id    BigInt?
+  module     String   @db.VarChar(100)
+  action     String   @db.VarChar(100)
+  record_id  BigInt?
+  old_values String?  @db.Text
+  new_values String?  @db.Text
+  ip_address String?  @db.VarChar(45)
+  timestamp  DateTime @default(now()) @db.Timestamp(0)
+
+  user       User?    @relation(fields: [user_id], references: [user_id], onDelete: SetNull)
+
+  @@map("audit_logs")
+}
+
+// ──────────────────────────────────────────────────────────
+// COMMUNICATION MODULE
+// ──────────────────────────────────────────────────────────
+
+model Notification {
+  notification_id BigInt   @id @default(autoincrement())
+  user_id         BigInt
+  title           String   @db.VarChar(255)
+  message         String   @db.Text
+  is_read         Boolean  @default(false)
+  created_at      DateTime @default(now()) @db.Timestamp(0)
+
+  user            User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model Announcement {
+  announcement_id BigInt   @id @default(autoincrement())
+  company_id      BigInt
+  title           String   @db.VarChar(255)
+  content         String   @db.Text
+  target_audience String?  @db.VarChar(100)
+  created_at      DateTime @default(now()) @db.Timestamp(0)
+  updated_at      DateTime @updatedAt @db.Timestamp(0)
+
+  company         Company  @relation(fields: [company_id], references: [company_id], onDelete: Cascade)
+
+  @@map("announcements")
+}
+
+model Meeting {
+  meeting_id   BigInt   @id @default(autoincrement())
+  company_id   BigInt
+  title        String   @db.VarChar(255)
+  description  String?  @db.Text
+  start_time   DateTime @db.DateTime(0)
+  end_time     DateTime @db.DateTime(0)
+  meeting_link String?  @db.VarChar(500)
+  location     String?  @db.VarChar(255)
+  created_at   DateTime @default(now()) @db.Timestamp(0)
+
+  company      Company  @relation(fields: [company_id], references: [company_id], onDelete: Cascade)
+
+  @@map("meetings")
+}
+
+model JobPosting {
+  posting_id  BigInt   @id @default(autoincrement())
+  company_id  BigInt
+  title       String   @db.VarChar(255)
+  description String   @db.Text
+  department  String   @db.VarChar(100)
+  status      String   @default("OPEN") @db.VarChar(50)
+  created_at  DateTime @default(now()) @db.Timestamp(0)
+
+  company     Company  @relation(fields: [company_id], references: [company_id], onDelete: Cascade)
+
+  @@map("job_postings")
+}
+
