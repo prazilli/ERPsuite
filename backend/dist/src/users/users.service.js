@@ -1,0 +1,353 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.UsersService = void 0;
+const common_1 = require("@nestjs/common");
+const prisma_service_1 = require("../prisma/prisma.service");
+const bcrypt = __importStar(require("bcrypt"));
+let UsersService = class UsersService {
+    prisma;
+    constructor(prisma) {
+        this.prisma = prisma;
+    }
+    async createUser(companyId, data, currentUser) {
+        await this.verifyTenant(companyId, currentUser);
+        const isCompanyAdmin = currentUser.roleName === 'Company Head / CEO' || currentUser.roleName === 'Company Admin';
+        const isDeptHead = currentUser.roleName === 'Department Head';
+        const isSuperAdmin = currentUser.roleName === 'Super Admin';
+        if (!isCompanyAdmin && !isDeptHead && !isSuperAdmin) {
+            throw new common_1.ForbiddenException('Only administrators or Department Heads can register new employees.');
+        }
+        let departmentId = data.departmentId ? BigInt(data.departmentId) : null;
+        if (isDeptHead) {
+            departmentId = currentUser.departmentId ? BigInt(currentUser.departmentId) : null;
+            if (!departmentId) {
+                throw new common_1.BadRequestException('Department Head is not assigned to any department.');
+            }
+        }
+        const existing = await this.prisma.user.findUnique({
+            where: { email: data.email },
+        });
+        if (existing) {
+            throw new common_1.BadRequestException('Email address is already in use.');
+        }
+        const passwordHash = await bcrypt.hash(data.password || 'Amdox123!', 10);
+        const roleId = data.roleId ? BigInt(data.roleId) : 4n;
+        if (roleId === 1n && !isSuperAdmin) {
+            throw new common_1.ForbiddenException('Cannot assign Super Admin role.');
+        }
+        const newUser = await this.prisma.user.create({
+            data: {
+                company_id: companyId,
+                department_id: departmentId,
+                first_name: data.firstName || (data.name ? data.name.split(' ')[0] : ''),
+                last_name: data.lastName || (data.name ? data.name.split(' ').slice(1).join(' ') : ''),
+                email: data.email,
+                password_hash: passwordHash,
+                phone: data.phone || null,
+                role_id: roleId,
+                is_active: true,
+                email_verified: true,
+            },
+        });
+        return {
+            user_id: newUser.user_id.toString(),
+            first_name: newUser.first_name,
+            last_name: newUser.last_name,
+            email: newUser.email,
+            role_id: newUser.role_id.toString(),
+            company_id: newUser.company_id.toString(),
+            department_id: newUser.department_id ? newUser.department_id.toString() : null,
+        };
+    }
+    async findAll(companyId, currentUser, search, page, limit) {
+        await this.verifyTenant(companyId, currentUser);
+        const isEmployeeOrSupervisor = (currentUser.roleName === 'Employee' || currentUser.roleName === 'Supervisor') && currentUser.departmentId;
+        const where = {
+            company_id: companyId,
+            ...(isEmployeeOrSupervisor ? { department_id: BigInt(currentUser.departmentId) } : {}),
+        };
+        if (search) {
+            where.OR = [
+                { first_name: { contains: search } },
+                { last_name: { contains: search } },
+                { email: { contains: search } },
+            ];
+        }
+        if (page || limit) {
+            const p = page || 1;
+            const l = limit || 10;
+            const skip = (p - 1) * l;
+            const [users, totalCount] = await Promise.all([
+                this.prisma.user.findMany({
+                    where,
+                    skip,
+                    take: l,
+                    include: {
+                        role: true,
+                        department: true,
+                        employee_profile: {
+                            include: {
+                                manager: true,
+                            },
+                        },
+                    },
+                    orderBy: {
+                        first_name: 'asc',
+                    },
+                }),
+                this.prisma.user.count({ where }),
+            ]);
+            return {
+                data: users.map((u) => ({
+                    id: u.user_id.toString(),
+                    name: `${u.first_name || ''} ${u.last_name || ''}`.trim(),
+                    firstName: u.first_name,
+                    lastName: u.last_name,
+                    email: u.email,
+                    phone: u.phone,
+                    status: u.is_active ? 'active' : 'inactive',
+                    isActive: u.is_active,
+                    role: { id: u.role.role_id.toString(), name: u.role.role_name },
+                    department: u.department ? { id: u.department.department_id.toString(), name: u.department.department_name } : null,
+                    createdAt: u.created_at,
+                    jobTitle: u.employee_profile?.job_title || 'Associate',
+                    manager: u.employee_profile?.manager
+                        ? {
+                            id: u.employee_profile.manager.user_id.toString(),
+                            name: `${u.employee_profile.manager.first_name || ''} ${u.employee_profile.manager.last_name || ''}`.trim(),
+                        }
+                        : null,
+                })),
+                pagination: {
+                    total: totalCount,
+                    page: p,
+                    limit: l,
+                    totalPages: Math.ceil(totalCount / l),
+                },
+            };
+        }
+        const users = await this.prisma.user.findMany({
+            where,
+            include: {
+                role: true,
+                department: true,
+                employee_profile: {
+                    include: {
+                        manager: true,
+                    },
+                },
+            },
+            orderBy: {
+                first_name: 'asc',
+            },
+        });
+        return users.map((u) => ({
+            id: u.user_id.toString(),
+            name: `${u.first_name || ''} ${u.last_name || ''}`.trim(),
+            firstName: u.first_name,
+            lastName: u.last_name,
+            email: u.email,
+            phone: u.phone,
+            status: u.is_active ? 'active' : 'inactive',
+            isActive: u.is_active,
+            role: { id: u.role.role_id.toString(), name: u.role.role_name },
+            department: u.department ? { id: u.department.department_id.toString(), name: u.department.department_name } : null,
+            createdAt: u.created_at,
+            jobTitle: u.employee_profile?.job_title || 'Associate',
+            manager: u.employee_profile?.manager
+                ? {
+                    id: u.employee_profile.manager.user_id.toString(),
+                    name: `${u.employee_profile.manager.first_name || ''} ${u.employee_profile.manager.last_name || ''}`.trim(),
+                }
+                : null,
+        }));
+    }
+    async findOne(id, currentUser) {
+        const user = await this.prisma.user.findFirst({
+            where: { user_id: id, is_active: true },
+            include: {
+                role: true,
+                department: true,
+            },
+        });
+        if (!user) {
+            throw new common_1.NotFoundException('User not found');
+        }
+        await this.verifyTenant(user.company_id, currentUser);
+        if ((currentUser.roleName === 'Employee' || currentUser.roleName === 'Supervisor') &&
+            currentUser.departmentId &&
+            user.department_id !== BigInt(currentUser.departmentId)) {
+            throw new common_1.ForbiddenException('Department isolation: You are restricted to your department users.');
+        }
+        return user;
+    }
+    async getRoles() {
+        const roles = await this.prisma.role.findMany({
+            include: {
+                permissions: {
+                    include: { permission: true },
+                },
+            },
+        });
+        return roles.map((r) => ({
+            id: r.role_id.toString(),
+            name: r.role_name,
+            description: r.description,
+            permissions: r.permissions.map((p) => p.permission.permission_name),
+        }));
+    }
+    async getPermissions() {
+        const perms = await this.prisma.permission.findMany();
+        return perms.map((p) => ({
+            id: p.permission_id.toString(),
+            name: p.permission_name,
+        }));
+    }
+    async createCustomRole(data, currentUser) {
+        if (currentUser.roleName !== 'Company Head / CEO' && currentUser.roleName !== 'Company Admin' && currentUser.roleName !== 'Super Admin') {
+            throw new common_1.ForbiddenException('Only Administrators can define custom roles.');
+        }
+        const existing = await this.prisma.role.findUnique({
+            where: { role_name: data.name },
+        });
+        if (existing) {
+            throw new common_1.BadRequestException('Role name already exists.');
+        }
+        return this.prisma.$transaction(async (tx) => {
+            const newRole = await tx.role.create({
+                data: {
+                    role_name: data.name,
+                    description: data.description,
+                },
+            });
+            if (data.permissionIds && data.permissionIds.length > 0) {
+                for (const permId of data.permissionIds) {
+                    await tx.rolePermission.create({
+                        data: {
+                            role_id: newRole.role_id,
+                            permission_id: BigInt(permId),
+                        },
+                    });
+                }
+            }
+            return tx.role.findUnique({
+                where: { role_id: newRole.role_id },
+                include: {
+                    permissions: {
+                        include: { permission: true },
+                    },
+                },
+            });
+        });
+    }
+    async updateUser(userId, data, currentUser) {
+        const targetUser = await this.prisma.user.findUnique({
+            where: { user_id: userId },
+        });
+        if (!targetUser) {
+            throw new common_1.NotFoundException('User not found');
+        }
+        await this.verifyTenant(targetUser.company_id, currentUser);
+        const isCompanyAdmin = currentUser.roleName === 'Company Head / CEO' || currentUser.roleName === 'Company Admin';
+        const isSuperAdmin = currentUser.roleName === 'Super Admin';
+        if (!isCompanyAdmin && !isSuperAdmin) {
+            throw new common_1.ForbiddenException('Only administrators can update employee details.');
+        }
+        return this.prisma.$transaction(async (tx) => {
+            const updatedUser = await tx.user.update({
+                where: { user_id: userId },
+                data: {
+                    first_name: data.firstName !== undefined ? data.firstName : undefined,
+                    last_name: data.lastName !== undefined ? data.lastName : undefined,
+                    phone: data.phone !== undefined ? data.phone : undefined,
+                    role_id: data.roleId ? BigInt(data.roleId) : undefined,
+                    department_id: data.departmentId !== undefined ? (data.departmentId ? BigInt(data.departmentId) : null) : undefined,
+                    is_active: data.isActive !== undefined ? data.isActive : undefined,
+                },
+            });
+            if (data.managerId !== undefined || data.jobTitle !== undefined) {
+                await tx.employeeProfile.upsert({
+                    where: { user_id: userId },
+                    create: {
+                        user_id: userId,
+                        job_title: data.jobTitle || 'Associate',
+                        hire_date: new Date(),
+                        manager_id: data.managerId ? BigInt(data.managerId) : null,
+                        status: data.isActive === false ? 'INACTIVE' : 'ACTIVE',
+                    },
+                    update: {
+                        job_title: data.jobTitle !== undefined ? data.jobTitle : undefined,
+                        manager_id: data.managerId !== undefined ? (data.managerId ? BigInt(data.managerId) : null) : undefined,
+                        status: data.isActive === false ? 'INACTIVE' : 'ACTIVE',
+                    },
+                });
+            }
+            return updatedUser;
+        });
+    }
+    async verifyTenant(companyId, currentUser) {
+        if (currentUser.roleName === 'Super Admin')
+            return;
+        const company = await this.prisma.company.findUnique({
+            where: { company_id: companyId },
+            select: { tenant_id: true },
+        });
+        if (!company) {
+            throw new common_1.NotFoundException('Company profile not found');
+        }
+        if (BigInt(currentUser.tenantId) !== company.tenant_id) {
+            throw new common_1.ForbiddenException("Tenant access isolation violation: Cannot access another tenant's data.");
+        }
+        if (currentUser.companyType === 'SINGLE' && BigInt(currentUser.companyId) !== companyId) {
+            throw new common_1.ForbiddenException('Tenant access isolation violation: Cannot access another company data.');
+        }
+    }
+};
+exports.UsersService = UsersService;
+exports.UsersService = UsersService = __decorate([
+    (0, common_1.Injectable)(),
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+], UsersService);
+//# sourceMappingURL=users.service.js.map

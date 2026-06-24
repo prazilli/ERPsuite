@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  amdox-mysql:
+    image: mysql:8.0
+    container_name: amdox-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: amdox_erp_dev
+    ports:
+      - "3306:3306"
+    volumes:
+      - amdox_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+    networks:
+      - amdox-network
+
+  amdox-redis:
+    image: redis:7-alpine
+    container_name: amdox-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - amdox_redis_data:/data
+    networks:
+      - amdox-network
+
+volumes:
+  amdox_mysql_data:
+  amdox_redis_data:
+
+networks:
+  amdox-network:
+    driver: bridge

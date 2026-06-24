@@ -1,0 +1,41 @@
+spring:
+  application:
+    name: amdox-erp
+  profiles:
+    active: dev
+
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
+  datasource:
+    url: jdbc:mysql://localhost:3306/amdox_erp_dev?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    username: root
+    password: password
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.MySQLDialect
+  data:
+    redis:
+      host: localhost
+      port: 6379
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+
+amdox:
+  security:
+    jwt:
+      secret: "7e504c3e809e6c4e0b57e7bb7f90c8a32b2e811c75b1c8f126f50b4a4d6f4523" # Minimum 256-bit secret key
+      expiration: 86400000 # 24 hours
+      refresh-expiration: 604800000 # 7 days
+
+server:
+  port: 8080
